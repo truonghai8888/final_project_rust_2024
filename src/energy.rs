@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 // You may uncomment and use the following import if you need it. You may also read its
 // documentation at https://doc.rust-lang.org/std/cell/struct.RefCell.html
-// use std::cell::RefCell;
+use std::cell::RefCell;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub struct Joule(pub u32);
@@ -56,7 +56,7 @@ pub struct Diesel;
 impl Fuel for Diesel {
     type Output = Joule;
     fn energy_density() -> Self::Output {
-        todo!("100 BTU")
+        Joule::from(100)
     }
 }
 
@@ -64,7 +64,7 @@ pub struct LithiumBattery;
 impl Fuel for LithiumBattery {
     type Output = Calorie;
     fn energy_density() -> Self::Output {
-        todo!("200 BTU")
+        Calorie::from(200)
     }
 }
 
@@ -72,7 +72,7 @@ pub struct Uranium;
 impl Fuel for Uranium {
     type Output = Joule;
     fn energy_density() -> Self::Output {
-        todo!("1000 BTU")
+        Joule::from(1000)
     }
 }
 
@@ -119,14 +119,16 @@ pub trait ProvideEnergy<F: Fuel> {
     ///
     /// This method must be provided as it will be the same in all implementations.
     fn provide_energy_with_efficiency(&self, f: FuelContainer<F>, e: u8) -> <F as Fuel>::Output {
-        todo!();
+        let efficiency = e.min(100) as u32;
+        let energy_density = F::energy_density().into();
+        (f.amount * efficiency * energy_density / 100).into()
     }
 
     /// Same as [`ProvideEnergy::provide_energy_with_efficiency`], but with an efficiency of 100.
     ///
     /// This method must be provided as it will be the same in all implementations.
     fn provide_energy_ideal(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!();
+        self.provide_energy_with_efficiency(f, 100)
     }
 }
 
@@ -134,7 +136,7 @@ pub trait ProvideEnergy<F: Fuel> {
 pub struct NuclearReactor;
 impl<F: Fuel> ProvideEnergy<F> for NuclearReactor {
     fn provide_energy(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        self.provide_energy_with_efficiency(f, 99)
     }
 }
 
@@ -143,17 +145,30 @@ impl<F: Fuel> ProvideEnergy<F> for NuclearReactor {
 /// The `DECAY` const must be interpreted as such: per every `DECAY` times `provide_energy` is
 /// called on an instance of this type, the efficiency should reduce by one. The initial efficiency
 /// must be configurable with a `fn new(efficiency: u8) -> Self`.
-pub struct InternalCombustion<const DECAY: u32>(/* Fill the fields as needed */);
+pub struct InternalCombustion<const DECAY: u32>{
+    efficiency: RefCell<u32>,
+    call_count: RefCell<u32>,
+}
 
 impl<const DECAY: u32> InternalCombustion<DECAY> {
     pub fn new(efficiency: u8) -> Self {
-        todo!()
+        Self {
+            efficiency: RefCell::new((efficiency as u32).min(100)),
+            call_count: RefCell::new(1),
+        }
     }
 }
 
 impl<const DECAY: u32, F: Fuel> ProvideEnergy<F> for InternalCombustion<DECAY> {
     fn provide_energy(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        let calls = self.call_count.replace_with(|&mut old| old + 1);
+        let new_efficiency = self.efficiency.replace_with(|&mut old| if calls % DECAY == 0 && calls > 0 {
+            old - 1
+        } else {
+            old
+        });
+        let energy_density = F::energy_density().into(); // Get energy density
+        (f.amount * new_efficiency * energy_density / 100).into() // Calculate energy
     }
 }
 
@@ -166,7 +181,8 @@ pub struct OmniGenerator<const EFFICIENCY: u8>;
 // NOTE: implement `ProvideEnergy` for `OmniGenerator` using only one `impl` block.
 impl<const EFFICIENCY: u8, F: Fuel> ProvideEnergy<F> for OmniGenerator<EFFICIENCY> {
     fn provide_energy(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        let energy_density = F::energy_density().into();
+        (f.amount * (EFFICIENCY as u32).min(100) * energy_density / 100).into()
     }
 }
 
@@ -182,7 +198,7 @@ impl<F1: Fuel, F2: Fuel> Fuel for Mixed<F1, F2> {
     type Output = BTU;
 
     fn energy_density() -> Self::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        (F1::energy_density().into() + F2::energy_density().into()) / 2
     }
 }
 
@@ -201,7 +217,8 @@ impl<const C: u8, F1: Fuel, F2: Fuel> Fuel for CustomMixed<C, F1, F2> {
     type Output = BTU;
 
     fn energy_density() -> Self::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        let c = C as u32;
+        (F1::energy_density().into() * c  + F2::energy_density().into() * (100 - c)) / 100
     }
 }
 
@@ -210,7 +227,8 @@ impl<const C: u8, F1: Fuel, F2: Fuel> Fuel for CustomMixed<C, F1, F2> {
 /// A function that returns the energy produced by the `OmniGenerator` with efficiency of 80%, when
 /// the fuel type is an even a mix of `Diesel` as `LithiumBattery`;
 pub fn omni_80_energy(amount: u32) -> BTU {
-    todo!();
+    let energy_density = CustomMixed::<50, Diesel, LithiumBattery>::energy_density(); // Get energy density
+    (amount * 80 * energy_density / 100).into() // Calculate energy
 }
 
 // Finally, let's consider marker traits, and some trait bounds.
@@ -224,9 +242,9 @@ impl IsRenewable for LithiumBattery {}
 ///
 /// It has perfect efficiency.
 pub struct GreenEngine<F: Fuel>(pub PhantomData<F>);
-impl<F: Fuel> ProvideEnergy<F> for GreenEngine<F> {
+impl<F: Fuel> ProvideEnergy<F> for GreenEngine<F> where F: IsRenewable {
     fn provide_energy(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        self.provide_energy_ideal(f)
     }
 }
 
@@ -235,9 +253,10 @@ impl<F: Fuel> ProvideEnergy<F> for GreenEngine<F> {
 ///
 /// It has perfect efficiency.
 pub struct BritishEngine<F: Fuel>(pub PhantomData<F>);
-impl<F: Fuel> ProvideEnergy<F> for BritishEngine<F> {
+impl<F: Fuel> ProvideEnergy<F> for BritishEngine<F> where
+F::Output: Into<BTU> + From<BTU>, {
     fn provide_energy(&self, f: FuelContainer<F>) -> <F as Fuel>::Output {
-        todo!("complete the implementation; note that you might need to change the trait bounds and generics of the `impl` line");
+        self.provide_energy_ideal(f)
     }
 }
 
@@ -328,11 +347,21 @@ mod tests {
     }
     #[test]
     fn green_should_work() {
-        todo!()
+        let ge_lb = GreenEngine::<LithiumBattery>(PhantomData);
+        assert_eq!(
+            ge_lb.provide_energy(FuelContainer::<LithiumBattery>::new(10))
+                .to_btu(),
+                2000
+        );
     }
 
     #[test]
     fn british_should_work() {
-        todo!()
+        let be_u = BritishEngine::<Uranium>(PhantomData);
+        assert_eq!(
+            be_u.provide_energy(FuelContainer::<Uranium>::new(10))
+                .to_btu(),
+                10000
+        );
     }
 }
